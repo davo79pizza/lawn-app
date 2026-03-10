@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LawnLaser AR</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #overlay { position: absolute; top: 20px; width: 100%; text-align: center; color: #39FF14; z-index: 10; pointer-events: none; }
+        #status { font-size: 24px; font-weight: bold; text-shadow: 2px 2px #000; }
+        #drift-bar { width: 80%; height: 20px; background: rgba(255,255,255,0.2); margin: 10px auto; border: 2px solid #39FF14; position: relative; }
+        #indicator { width: 10px; height: 30px; background: red; position: absolute; left: 50%; top: -5px; transform: translateX(-50%); transition: left 0.1s; }
+        #btn-container { position: absolute; bottom: 30px; width: 100%; text-align: center; }
+        button { padding: 20px 40px; font-size: 20px; background: #39FF14; border: none; border-radius: 50px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <div id="status">LINE: STRAIGHT</div>
+        <div id="drift-bar"><div id="indicator"></div></div>
+        <div id="heading">HEADING: --°</div>
+    </div>
+    <div id="btn-container">
+        <button id="lockBtn">SET START POINT</button>
+    </div>
+
+    <script type="module">
+        let initialHeading = null;
+        const indicator = document.getElementById('indicator');
+        const headingDisplay = document.getElementById('heading');
+
+        // 1. SENSOR LOGIC: Detect Drift
+        window.addEventListener('deviceorientationabsolute', (event) => {
+            if (event.webkitCompassHeading) {
+                let currentHeading = event.webkitCompassHeading;
+                
+                if (initialHeading === null) return;
+
+                headingDisplay.innerText = `HEADING: ${Math.round(currentHeading)}°`;
+                
+                // Calculate drift angle
+                let diff = currentHeading - initialHeading;
+                if (diff > 180) diff -= 360;
+                if (diff < -180) diff += 360;
+
+                // Move the UI indicator (Max 45 degree visual swing)
+                let percent = 50 + (diff * 2); 
+                indicator.style.left = `${Math.min(Math.max(percent, 0), 100)}%`;
+
+                if (Math.abs(diff) > 3) {
+                    document.getElementById('status').innerText = "STEER LEFT!";
+                    document.getElementById('status').style.color = "red";
+                } else {
+                    document.getElementById('status').innerText = "LINE: STRAIGHT";
+                    document.getElementById('status').style.color = "#39FF14";
+                }
+            }
+        });
+
+        document.getElementById('lockBtn').addEventListener('click', () => {
+            // Lock the current heading as "True North" for this row
+            window.addEventListener('deviceorientationabsolute', (e) => {
+                if (initialHeading === null) {
+                    initialHeading = e.webkitCompassHeading;
+                    alert("Path Locked. Walk straight!");
+                    document.getElementById('lockBtn').innerText = "RESET LINE";
+                }
+            }, { once: true });
+        });
+    </script>
+</body>
+</html>
