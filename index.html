@@ -3,75 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LawnLaser Pro - Final Edition</title>
+    <title>LawnLaser - ILS Guidance</title>
     <style>
-        body { margin: 0; background: #000; color: #39FF14; font-family: monospace; overflow: hidden; touch-action: none; }
-        #hud { position: absolute; top: 5%; width: 100%; text-align: center; z-index: 10; }
-        #health-bar { font-size: 12px; margin-bottom: 5px; color: #888; }
-        #drift-window { width: 90%; height: 60px; border: 4px solid #39FF14; margin: 10px auto; position: relative; background: rgba(0,0,0,0.5); }
-        #center-line { position: absolute; left: 50%; width: 2px; height: 100%; background: #39FF14; }
-        #mower-pos { position: absolute; left: 50%; width: 20px; height: 40px; background: #fff; top: 10px; transform: translateX(-50%); transition: left 0.1s ease-out; }
-        #map-container { width: 100vw; height: 40vh; background: #111; margin-top: 20px; border-top: 1px solid #333; }
-        canvas { width: 100%; height: 100%; }
-        #btn-container { position: absolute; bottom: 30px; width: 100%; text-align: center; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-        .btn { padding: 20px; font-size: 18px; font-weight: bold; border-radius: 10px; border: none; width: 85%; cursor: pointer; }
-        #mainBtn { background: #39FF14; color: black; }
-        #nextBtn { background: #ffcc00; color: black; display: none; }
-        #stats { font-size: 14px; color: #888; margin-top: 5px; }
+        body { margin: 0; background: #000; color: #39FF14; font-family: 'Courier New', monospace; overflow: hidden; touch-action: none; }
+        
+        /* ILS DISPLAY CONTAINER */
+        #ils-container { position: absolute; top: 0; width: 100%; height: 50vh; background: #050505; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 2px solid #222; }
+        
+        /* THE CDI SCALE (DOTS) */
+        #cdi-scale { width: 80%; height: 4px; background: #333; position: relative; display: flex; justify-content: space-between; align-items: center; }
+        .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; }
+        .dot.center { width: 10px; height: 10px; background: #39FF14; border: 1px solid #fff; }
+
+        /* THE MOVING NEEDLE (LOCALIZER) */
+        #needle { position: absolute; width: 6px; height: 120px; background: #39FF14; left: 50%; transform: translateX(-50%); transition: left 0.15s ease-out; box-shadow: 0 0 15px #39FF14; z-index: 5; }
+        
+        #heading-bug { font-size: 24px; margin-bottom: 60px; }
+        #status-text { font-size: 18px; font-weight: bold; margin-top: 60px; text-transform: uppercase; letter-spacing: 2px; }
+
+        /* MAP & BUTTONS */
+        #map-container { width: 100vw; height: 30vh; background: #111; margin-top: 50vh; position: relative; }
+        canvas { width: 100%; height: 100%; opacity: 0.6; }
+        
+        #btn-container { position: absolute; bottom: 20px; width: 100%; text-align: center; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .btn { padding: 18px; font-size: 18px; font-weight: bold; border-radius: 8px; border: none; width: 85%; cursor: pointer; text-transform: uppercase; }
+        #mainBtn { background: #39FF14; color: #000; }
+        #nextBtn { background: #ffcc00; color: #000; display: none; }
+        
+        #stats { font-size: 12px; color: #666; position: absolute; bottom: 5px; width: 100%; text-align: center; }
     </style>
 </head>
 <body>
 
-    <div id="hud">
-        <div id="health-bar">SENSOR HEALTH: CHECKING...</div>
-        <div id="status">STEP 1: ALIGN MOWER</div>
-        <div id="drift-window">
-            <div id="center-line"></div>
-            <div id="mower-pos"></div>
+    <div id="ils-container">
+        <div id="heading-bug">▼</div>
+        
+        <div id="cdi-scale">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            <div class="dot center"></div>
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            
+            <div id="needle"></div>
         </div>
-        <div id="stats">HEADING: --° | DRIFT: --°</div>
+
+        <div id="status-text">OFF COURSE</div>
     </div>
 
-    <div id="map-container">
-        <canvas id="lawnMap"></canvas>
-    </div>
+    <div id="map-container"><canvas id="lawnMap"></canvas></div>
 
     <div id="btn-container">
-        <button class="btn" id="mainBtn">SET START POINT</button>
-        <button class="btn" id="nextBtn">NEXT ROW (180° FLIP)</button>
+        <button class="btn" id="mainBtn">Set Start Point</button>
+        <button class="btn" id="nextBtn">Next Row (180° Flip)</button>
     </div>
+    
+    <div id="stats">SENSORS: OK | DRIFT: 0.0°</div>
 
     <script>
         let appState = "READY"; 
         let initialHeading = null;
         let smoothedHeading = 0;
         let points = [];
-        const alpha = 0.12; // Heavy smoothing for mower vibration
+        const alpha = 0.15; 
 
-        const canvas = document.getElementById('lawnMap');
-        const ctx = canvas.getContext('2d');
-        const mower = document.getElementById('mower-pos');
-        const status = document.getElementById('status');
-        const healthBar = document.getElementById('health-bar');
-        const stats = document.getElementById('stats');
+        const needle = document.getElementById('needle');
+        const statusText = document.getElementById('status-text');
         const mainBtn = document.getElementById('mainBtn');
         const nextBtn = document.getElementById('nextBtn');
-
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight * 0.4;
+        const stats = document.getElementById('stats');
 
         function handleOrientation(e) {
             let rawHeading = e.webkitCompassHeading || (360 - e.alpha);
-            let accuracy = e.webkitCompassAccuracy; // iOS specific accuracy in degrees
-
-            // 1. Update Health Indicator
-            if (accuracy > 0) {
-                if (accuracy < 15) { healthBar.innerText = "SENSOR HEALTH: EXCELLENT"; healthBar.style.color = "#39FF14"; }
-                else if (accuracy < 30) { healthBar.innerText = "SENSOR HEALTH: GOOD"; healthBar.style.color = "yellow"; }
-                else { healthBar.innerText = "SENSOR HEALTH: POOR (CALIBRATE!)"; healthBar.style.color = "red"; }
-            }
-
-            // 2. Filter vibration
             smoothedHeading = (alpha * rawHeading) + (1.0 - alpha) * smoothedHeading;
 
             if (appState === "LOCKED") {
@@ -79,83 +80,19 @@
                 if (diff > 180) diff -= 360;
                 if (diff < -180) diff += 360;
 
-                mower.style.left = `${50 + (diff * 5)}%`;
-                
-                if (Math.abs(diff) > 4) {
-                    if (navigator.vibrate) navigator.vibrate(150);
-                    status.innerText = "STEER " + (diff > 0 ? "LEFT" : "RIGHT");
-                    status.style.color = "red";
-                    document.body.style.backgroundColor = "#200";
-                } else {
-                    status.innerText = "KEEP STRAIGHT";
-                    status.style.color = "#39FF14";
-                    document.body.style.backgroundColor = "#000";
-                }
-                stats.innerText = `HEADING: ${Math.round(smoothedHeading)}° | DRIFT: ${diff.toFixed(1)}°`;
-            } else {
-                stats.innerText = `HEADING: ${Math.round(smoothedHeading)}°`;
-            }
-        }
+                // CDI LOGIC: Needle moves opposite to drift. 
+                // Full scale deflection (40% from center) at 10 degrees.
+                let needlePos = 50 - (diff * 4); 
+                needlePos = Math.max(10, Math.min(90, needlePos)); // Constrain to scale
+                needle.style.left = needlePos + "%";
 
-        mainBtn.addEventListener('click', async () => {
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                await DeviceOrientationEvent.requestPermission();
-            }
-
-            if (appState === "READY") {
-                appState = "MAPPING";
-                initialHeading = smoothedHeading;
-                mainBtn.innerText = "FINISH FIRST LINE (SET CALIBRATION)";
-                mainBtn.style.background = "#ff3333";
-                status.innerText = "WALK TO END OF FIRST ROW";
-                window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-                startGps();
-            } 
-            else if (appState === "MAPPING") {
-                appState = "LOCKED";
-                initialHeading = smoothedHeading; // Final calibration lock
-                mainBtn.innerText = "RESET ALL";
-                mainBtn.style.background = "#444";
-                mainBtn.style.color = "white";
-                nextBtn.style.display = "block";
-                status.innerText = "CALIBRATED & LOCKED";
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-            }
-            else { location.reload(); }
-        });
-
-        nextBtn.addEventListener('click', () => {
-            initialHeading = (initialHeading + 180) % 360;
-            status.innerText = "ROW FLIPPED - TURN AROUND";
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-            document.body.style.backgroundColor = "#220";
-            setTimeout(() => document.body.style.backgroundColor = "#000", 500);
-        });
-
-        function startGps() {
-            navigator.geolocation.watchPosition((pos) => {
-                points.push({x: pos.coords.longitude, y: pos.coords.latitude});
-                drawMap();
-            }, null, { enableHighAccuracy: true });
-        }
-
-        function drawMap() {
-            if (points.length < 2) return;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = "#39FF14";
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            const minX = Math.min(...points.map(p => p.x));
-            const maxX = Math.max(...points.map(p => p.x));
-            const minY = Math.min(...points.map(p => p.y));
-            const maxY = Math.max(...points.map(p => p.y));
-            points.forEach((p, i) => {
-                const x = ((p.x - minX) / (maxX - minX || 1)) * (canvas.width - 40) + 20;
-                const y = ((p.y - minY) / (maxY - minY || 1)) * (canvas.height - 40) + 20;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            });
-            ctx.stroke();
-        }
-    </script>
-</body>
-</html>
+                if (Math.abs(diff) > 5) {
+                    statusText.innerText = "LOCALIZER HIGH ERROR";
+                    statusText.style.color = "red";
+                    needle.style.background = "red";
+                    needle.style.boxShadow = "0 0 15px red";
+                    if (navigator.vibrate) navigator.vibrate(100);
+                } else if (Math.abs(diff) > 2) {
+                    statusText.innerText = "CORRECT " + (diff > 0 ? "LEFT" : "RIGHT");
+                    statusText.style.color = "yellow";
+                    needle.style.background = "yellow";
