@@ -3,96 +3,132 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LawnLaser - ILS Guidance</title>
+    <title>LawnLaser - Android ILS</title>
     <style>
-        body { margin: 0; background: #000; color: #39FF14; font-family: 'Courier New', monospace; overflow: hidden; touch-action: none; }
-        
-        /* ILS DISPLAY CONTAINER */
-        #ils-container { position: absolute; top: 0; width: 100%; height: 50vh; background: #050505; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 2px solid #222; }
-        
-        /* THE CDI SCALE (DOTS) */
+        body { margin: 0; background: #000; color: #39FF14; font-family: monospace; overflow: hidden; touch-action: none; }
+        #ils-container { position: absolute; top: 0; width: 100%; height: 45vh; background: #050505; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 2px solid #222; }
         #cdi-scale { width: 80%; height: 4px; background: #333; position: relative; display: flex; justify-content: space-between; align-items: center; }
         .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; }
         .dot.center { width: 10px; height: 10px; background: #39FF14; border: 1px solid #fff; }
-
-        /* THE MOVING NEEDLE (LOCALIZER) */
-        #needle { position: absolute; width: 6px; height: 120px; background: #39FF14; left: 50%; transform: translateX(-50%); transition: left 0.15s ease-out; box-shadow: 0 0 15px #39FF14; z-index: 5; }
-        
-        #heading-bug { font-size: 24px; margin-bottom: 60px; }
-        #status-text { font-size: 18px; font-weight: bold; margin-top: 60px; text-transform: uppercase; letter-spacing: 2px; }
-
-        /* MAP & BUTTONS */
-        #map-container { width: 100vw; height: 30vh; background: #111; margin-top: 50vh; position: relative; }
-        canvas { width: 100%; height: 100%; opacity: 0.6; }
-        
-        #btn-container { position: absolute; bottom: 20px; width: 100%; text-align: center; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-        .btn { padding: 18px; font-size: 18px; font-weight: bold; border-radius: 8px; border: none; width: 85%; cursor: pointer; text-transform: uppercase; }
+        #needle { position: absolute; width: 6px; height: 100px; background: #39FF14; left: 50%; transform: translateX(-50%); transition: left 0.1s linear; box-shadow: 0 0 15px #39FF14; }
+        #status-text { font-size: 18px; font-weight: bold; margin-top: 50px; text-transform: uppercase; }
+        #btn-container { position: absolute; bottom: 80px; width: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .btn { padding: 20px; font-size: 18px; font-weight: bold; border-radius: 8px; border: none; width: 85%; cursor: pointer; }
         #mainBtn { background: #39FF14; color: #000; }
         #nextBtn { background: #ffcc00; color: #000; display: none; }
-        
-        #stats { font-size: 12px; color: #666; position: absolute; bottom: 5px; width: 100%; text-align: center; }
+        #debug-log { position: absolute; bottom: 0; width: 100%; height: 60px; background: #222; font-size: 10px; color: #aaa; overflow-y: scroll; padding: 5px; }
     </style>
 </head>
 <body>
 
     <div id="ils-container">
-        <div id="heading-bug">▼</div>
-        
+        <div style="margin-bottom:40px">▼</div>
         <div id="cdi-scale">
             <div class="dot"></div><div class="dot"></div><div class="dot"></div>
             <div class="dot center"></div>
             <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-            
             <div id="needle"></div>
         </div>
-
-        <div id="status-text">OFF COURSE</div>
+        <div id="status-text">OFFLINE</div>
     </div>
-
-    <div id="map-container"><canvas id="lawnMap"></canvas></div>
 
     <div id="btn-container">
-        <button class="btn" id="mainBtn">Set Start Point</button>
-        <button class="btn" id="nextBtn">Next Row (180° Flip)</button>
+        <button class="btn" id="mainBtn">START SENSORS</button>
+        <button class="btn" id="nextBtn">NEXT ROW (180° FLIP)</button>
     </div>
-    
-    <div id="stats">SENSORS: OK | DRIFT: 0.0°</div>
+
+    <div id="debug-log">System Log: Waiting for start...</div>
 
     <script>
         let appState = "READY"; 
         let initialHeading = null;
         let smoothedHeading = 0;
-        let points = [];
         const alpha = 0.15; 
 
+        const log = (msg) => { document.getElementById('debug-log').innerText += "\n> " + msg; };
         const needle = document.getElementById('needle');
         const statusText = document.getElementById('status-text');
         const mainBtn = document.getElementById('mainBtn');
         const nextBtn = document.getElementById('nextBtn');
-        const stats = document.getElementById('stats');
 
         function handleOrientation(e) {
-            let rawHeading = e.webkitCompassHeading || (360 - e.alpha);
-            smoothedHeading = (alpha * rawHeading) + (1.0 - alpha) * smoothedHeading;
+            // Android uses alpha (0-360). 
+            // We use 'absolute' event to ensure it's aligned to Magnetic North.
+            let heading = e.alpha; 
+            if (e.absolute === false) log("Warning: Non-absolute orientation");
+
+            smoothedHeading = (alpha * heading) + (1.0 - alpha) * smoothedHeading;
 
             if (appState === "LOCKED") {
                 let diff = smoothedHeading - initialHeading;
                 if (diff > 180) diff -= 360;
                 if (diff < -180) diff += 360;
 
-                // CDI LOGIC: Needle moves opposite to drift. 
-                // Full scale deflection (40% from center) at 10 degrees.
                 let needlePos = 50 - (diff * 4); 
-                needlePos = Math.max(10, Math.min(90, needlePos)); // Constrain to scale
+                needlePos = Math.max(10, Math.min(90, needlePos));
                 needle.style.left = needlePos + "%";
 
                 if (Math.abs(diff) > 5) {
-                    statusText.innerText = "LOCALIZER HIGH ERROR";
+                    statusText.innerText = "ERROR: STEER " + (diff > 0 ? "LEFT" : "RIGHT");
                     statusText.style.color = "red";
                     needle.style.background = "red";
-                    needle.style.boxShadow = "0 0 15px red";
-                    if (navigator.vibrate) navigator.vibrate(100);
-                } else if (Math.abs(diff) > 2) {
-                    statusText.innerText = "CORRECT " + (diff > 0 ? "LEFT" : "RIGHT");
-                    statusText.style.color = "yellow";
-                    needle.style.background = "yellow";
+                } else {
+                    statusText.innerText = "ON COURSE";
+                    statusText.style.color = "#39FF14";
+                    needle.style.background = "#39FF14";
+                }
+            } else {
+                statusText.innerText = "SENSING: " + Math.round(smoothedHeading) + "°";
+            }
+        }
+
+        mainBtn.addEventListener('click', () => {
+            log("Attempting to start...");
+            
+            if (appState === "READY") {
+                // Check if the event exists
+                if ('ondeviceorientationabsolute' in window) {
+                    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+                    log("Absolute orientation started.");
+                } else if ('ondeviceorientation' in window) {
+                    window.addEventListener('deviceorientation', handleOrientation, true);
+                    log("Standard orientation started (less accurate).");
+                } else {
+                    log("ERROR: DeviceOrientation not supported.");
+                    alert("Your browser does not support orientation sensors.");
+                }
+
+                appState = "MAPPING";
+                initialHeading = smoothedHeading;
+                mainBtn.innerText = "SET START POINT";
+                statusText.innerText = "ALIGN AND CLICK";
+            } 
+            else if (appState === "MAPPING") {
+                appState = "WALKING";
+                initialHeading = smoothedHeading;
+                mainBtn.innerText = "FINISH FIRST LINE";
+                mainBtn.style.background = "#ff3333";
+                statusText.innerText = "WALK THE ROW...";
+            }
+            else if (appState === "WALKING") {
+                appState = "LOCKED";
+                initialHeading = smoothedHeading; 
+                mainBtn.innerText = "RESET SYSTEM";
+                mainBtn.style.background = "#444";
+                nextBtn.style.display = "block";
+                statusText.innerText = "ILS CAPTURED";
+                log("ILS Captured at " + Math.round(initialHeading) + "°");
+            }
+            else {
+                location.reload();
+            }
+        });
+
+        nextBtn.addEventListener('click', () => {
+            initialHeading = (initialHeading + 180) % 360;
+            statusText.innerText = "FLIPPED 180°";
+            log("Heading flipped.");
+        });
+    </script>
+</body>
+</html>
