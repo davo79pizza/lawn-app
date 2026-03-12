@@ -3,51 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LawnLaser - Lightbar HUD</title>
+    <title>LawnLaser Pro - Parallel Guide</title>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        body { margin: 0; background: #000; color: #fff; font-family: monospace; overflow: hidden; touch-action: none; }
         
-        /* THE LIGHTBAR GRID */
-        #lightbar { 
-            display: grid; 
-            grid-template-columns: repeat(7, 1fr); 
-            gap: 10px; 
-            width: 95%; 
-            height: 120px; 
-            margin: 20px auto;
-        }
-        .segment { 
-            background: #1a1a1a; 
-            border-radius: 8px; 
-            transition: background 0.1s; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center;
-            font-weight: bold;
-            font-size: 20px;
-            color: rgba(255,255,255,0.1);
-        }
+        /* LIGHTBAR HUD */
+        #status-area { text-align: center; padding-top: 10px; background: #050505; border-bottom: 2px solid #222; }
+        #instruction { font-size: 26px; font-weight: bold; text-transform: uppercase; margin: 10px 0; min-height: 35px; color: #39FF14; }
         
-        /* INDICATOR COLORS */
-        .on-green { background: #39FF14 !important; box-shadow: 0 0 25px #39FF14; color: #000 !important; }
+        #lightbar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; width: 95%; height: 100px; margin: 10px auto; }
+        .segment { background: #1a1a1a; border-radius: 5px; transition: background 0.1s; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; color: rgba(255,255,255,0.1); }
+        .on-green { background: #39FF14 !important; box-shadow: 0 0 20px #39FF14; color: #000 !important; }
         .on-yellow { background: #ffcc00 !important; box-shadow: 0 0 15px #ffcc00; color: #000 !important; }
         .on-red { background: #ff3333 !important; box-shadow: 0 0 15px #ff3333; color: #000 !important; }
 
-        #status-area { text-align: center; margin-top: 10px; }
-        #instruction { font-size: 32px; font-weight: bold; text-transform: uppercase; margin: 10px 0; }
-        
-        #btn-container { position: absolute; bottom: 80px; width: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 15px; }
-        .btn { padding: 25px; font-size: 20px; font-weight: bold; border-radius: 12px; border: none; width: 90%; cursor: pointer; }
+        /* BUTTONS */
+        #btn-container { position: absolute; bottom: 15px; width: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .btn { padding: 20px; font-size: 18px; font-weight: bold; border-radius: 10px; border: none; width: 90%; cursor: pointer; text-transform: uppercase; }
         #mainBtn { background: #39FF14; color: #000; }
-        #nextBtn { background: #444; color: #fff; display: none; }
+        #nextBtn { background: #ffcc00; color: #000; display: none; }
         
-        #debug { position: absolute; bottom: 0; width: 100%; height: 50px; background: #111; font-size: 10px; color: #444; padding: 5px; }
+        /* NUDGE CONTROLS */
+        #nudge-container { display: none; width: 90%; justify-content: space-between; gap: 10px; }
+        .nudge-btn { background: #333; color: #fff; flex: 1; padding: 15px; border-radius: 8px; border: 1px solid #444; font-weight: bold; }
+
+        #stats { font-size: 11px; color: #555; margin-top: 5px; }
     </style>
 </head>
 <body>
 
     <div id="status-area">
-        <div id="instruction">WAITING</div>
+        <div id="instruction">READY</div>
         <div id="lightbar">
             <div class="segment" id="seg-3L">L3</div>
             <div class="segment" id="seg-2L">L2</div>
@@ -60,17 +46,21 @@
     </div>
 
     <div id="btn-container">
-        <button class="btn" id="mainBtn">1. START SENSORS</button>
-        <button class="btn" id="nextBtn">NEXT ROW (FLIP)</button>
-    </div>
+        <div id="nudge-container">
+            <button class="nudge-btn" id="nudgeL">← NUDGE L</button>
+            <button class="nudge-btn" id="nudgeR">NUDGE R →</button>
+        </div>
 
-    <div id="debug">System Ready.</div>
+        <button class="btn" id="mainBtn">1. ACTIVATE SENSORS</button>
+        <button class="btn" id="nextBtn">NEXT ROW (180° FLIP)</button>
+        <div id="stats">Target: --° | Current: --° | Drift: --°</div>
+    </div>
 
     <script>
         let appState = "READY"; 
-        let initialHeading = null;
+        let targetHeading = null;
         let smoothedHeading = 0;
-        const alpha = 0.15; 
+        const alpha = 0.15; // Smooths out mower engine vibration
 
         const segments = {
             'L3': document.getElementById('seg-3L'), 'L2': document.getElementById('seg-2L'), 'L1': document.getElementById('seg-1L'),
@@ -80,68 +70,96 @@
         const instruction = document.getElementById('instruction');
         const mainBtn = document.getElementById('mainBtn');
         const nextBtn = document.getElementById('nextBtn');
+        const stats = document.getElementById('stats');
+        const nudgeContainer = document.getElementById('nudge-container');
 
-        function clearLightbar() {
-            Object.values(segments).forEach(s => s.className = 'segment');
-        }
+        function clearLightbar() { Object.values(segments).forEach(s => s.className = 'segment'); }
 
         function handleOrientation(e) {
-            let heading = e.alpha || e.webkitCompassHeading; 
+            let heading = e.webkitCompassHeading || (360 - e.alpha); 
+            if (heading === undefined) return;
+            
             smoothedHeading = (alpha * heading) + (1.0 - alpha) * smoothedHeading;
 
             if (appState === "LOCKED") {
-                let diff = smoothedHeading - initialHeading;
-                if (diff > 180) diff -= 360;
-                if (diff < -180) diff += 360;
+                let diff = smoothedHeading - targetHeading;
+                while (diff < -180) diff += 360;
+                while (diff > 180) diff -= 360;
 
                 clearLightbar();
+                stats.innerText = `Target: ${targetHeading.toFixed(1)}° | Current: ${Math.round(smoothedHeading)}° | Drift: ${diff.toFixed(1)}°`;
 
-                // LIGHTBAR LOGIC (Fly to the light)
-                // If diff is POSITIVE (drift right), lights fill on the LEFT (to pull you back)
-                if (Math.abs(diff) <= 2) {
+                if (Math.abs(diff) <= 1.5) { // Tight precision for mowing
                     segments['C'].classList.add('on-green');
                     instruction.innerText = "ON COURSE";
                     instruction.style.color = "#39FF14";
                 } 
-                else if (diff > 2 && diff <= 5) { segments['L1'].classList.add('on-yellow'); instruction.innerText = "STEER LEFT"; instruction.style.color = "#ffcc00"; }
-                else if (diff > 5 && diff <= 10) { segments['L2'].classList.add('on-yellow'); instruction.innerText = "STEER LEFT"; }
-                else if (diff > 10) { segments['L3'].classList.add('on-red'); instruction.innerText = "HARD LEFT"; instruction.style.color = "#ff3333"; }
-                
-                else if (diff < -2 && diff >= -5) { segments['R1'].classList.add('on-yellow'); instruction.innerText = "STEER RIGHT"; instruction.style.color = "#ffcc00"; }
-                else if (diff < -5 && diff >= -10) { segments['R2'].classList.add('on-yellow'); instruction.innerText = "STEER RIGHT"; }
-                else if (diff < -10) { segments['R3'].classList.add('on-red'); instruction.innerText = "HARD RIGHT"; instruction.style.color = "#ff3333"; }
+                else if (diff > 0) { 
+                    instruction.innerText = "STEER LEFT";
+                    instruction.style.color = (diff > 8) ? "#ff3333" : "#ffcc00";
+                    if (diff > 10) segments['L3'].classList.add('on-red');
+                    else if (diff > 5) segments['L2'].classList.add('on-yellow');
+                    else segments['L1'].classList.add('on-yellow');
+                }
+                else { 
+                    instruction.innerText = "STEER RIGHT";
+                    instruction.style.color = (diff < -8) ? "#ff3333" : "#ffcc00";
+                    if (diff < -10) segments['R3'].classList.add('on-red');
+                    else if (diff < -5) segments['R2'].classList.add('on-yellow');
+                    else segments['R1'].classList.add('on-yellow');
+                }
             } else {
                 instruction.innerText = Math.round(smoothedHeading) + "°";
             }
         }
 
-        mainBtn.addEventListener('click', () => {
+        mainBtn.addEventListener('click', async () => {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                await DeviceOrientationEvent.requestPermission();
+            }
+
             if (appState === "READY") {
                 window.addEventListener('deviceorientationabsolute', handleOrientation, true);
                 appState = "MAPPING";
                 mainBtn.innerText = "2. SET START POINT";
+                instruction.innerText = "ALIGN MOWER";
             } 
             else if (appState === "MAPPING") {
                 appState = "WALKING";
-                initialHeading = smoothedHeading;
-                mainBtn.innerText = "3. FINISH FIRST LINE";
+                targetHeading = smoothedHeading;
+                mainBtn.innerText = "3. FINISH LINE & LOCK";
                 mainBtn.style.background = "#ff3333";
+                instruction.innerText = "WALK STRAIGHT";
             }
             else if (appState === "WALKING") {
                 appState = "LOCKED";
-                initialHeading = smoothedHeading; 
+                targetHeading = smoothedHeading; 
                 mainBtn.innerText = "RESET SYSTEM";
-                mainBtn.style.background = "#222";
+                mainBtn.style.background = "#333";
                 mainBtn.style.color = "#fff";
                 nextBtn.style.display = "block";
+                nudgeContainer.style.display = "flex";
                 instruction.innerText = "PATH LOCKED";
             }
             else { location.reload(); }
         });
 
         nextBtn.addEventListener('click', () => {
-            initialHeading = (initialHeading + 180) % 360;
+            targetHeading = (targetHeading + 180) % 360;
+            instruction.innerText = "ROW FLIPPED";
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            document.body.style.backgroundColor = "#220";
+            setTimeout(() => { document.body.style.backgroundColor = "#000"; }, 300);
+        });
+
+        // NUDGE LOGIC: Fine-tune the target heading by 0.5 degrees
+        document.getElementById('nudgeL').addEventListener('click', () => {
+            targetHeading = (targetHeading - 0.5 + 360) % 360;
+            if (navigator.vibrate) navigator.vibrate(50);
+        });
+        document.getElementById('nudgeR').addEventListener('click', () => {
+            targetHeading = (targetHeading + 0.5) % 360;
+            if (navigator.vibrate) navigator.vibrate(50);
         });
     </script>
 </body>
