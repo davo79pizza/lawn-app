@@ -3,149 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LawnLaser Pro - ILS Edition</title>
+    <title>LawnLaser - Lightbar HUD</title>
     <style>
-        body { margin: 0; background: #000; color: #39FF14; font-family: monospace; overflow: hidden; touch-action: none; }
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
         
-        /* AVIATION HUD CONTAINER */
-        #ils-container { position: absolute; top: 0; width: 100%; height: 50vh; background: #050505; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 2px solid #222; }
+        /* THE LIGHTBAR GRID */
+        #lightbar { 
+            display: grid; 
+            grid-template-columns: repeat(7, 1fr); 
+            gap: 10px; 
+            width: 95%; 
+            height: 120px; 
+            margin: 20px auto;
+        }
+        .segment { 
+            background: #1a1a1a; 
+            border-radius: 8px; 
+            transition: background 0.1s; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            font-weight: bold;
+            font-size: 20px;
+            color: rgba(255,255,255,0.1);
+        }
         
-        /* THE CDI SCALE (DOTS) */
-        #cdi-scale { width: 85%; height: 4px; background: #333; position: relative; display: flex; justify-content: space-between; align-items: center; }
-        .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; }
-        .dot.center { width: 12px; height: 12px; background: transparent; border: 2px solid #39FF14; border-radius: 50%; z-index: 2; }
+        /* INDICATOR COLORS */
+        .on-green { background: #39FF14 !important; box-shadow: 0 0 25px #39FF14; color: #000 !important; }
+        .on-yellow { background: #ffcc00 !important; box-shadow: 0 0 15px #ffcc00; color: #000 !important; }
+        .on-red { background: #ff3333 !important; box-shadow: 0 0 15px #ff3333; color: #000 !important; }
 
-        /* THE MOVING NEEDLE (LOCALIZER) */
-        #needle { position: absolute; width: 6px; height: 140px; background: #39FF14; left: 50%; transform: translateX(-50%); transition: left 0.1s linear; box-shadow: 0 0 15px #39FF14; z-index: 5; }
+        #status-area { text-align: center; margin-top: 10px; }
+        #instruction { font-size: 32px; font-weight: bold; text-transform: uppercase; margin: 10px 0; }
         
-        #heading-bug { font-size: 24px; margin-bottom: 60px; color: #fff; }
-        #status-text { font-size: 22px; font-weight: bold; margin-top: 60px; text-transform: uppercase; letter-spacing: 2px; }
-
-        /* BUTTONS & LOGS */
-        #btn-container { position: absolute; bottom: 80px; width: 100%; text-align: center; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-        .btn { padding: 22px; font-size: 18px; font-weight: bold; border-radius: 10px; border: none; width: 85%; cursor: pointer; text-transform: uppercase; }
+        #btn-container { position: absolute; bottom: 80px; width: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .btn { padding: 25px; font-size: 20px; font-weight: bold; border-radius: 12px; border: none; width: 90%; cursor: pointer; }
         #mainBtn { background: #39FF14; color: #000; }
-        #nextBtn { background: #ffcc00; color: #000; display: none; }
+        #nextBtn { background: #444; color: #fff; display: none; }
         
-        #stats { font-size: 12px; color: #666; position: absolute; bottom: 65px; width: 100%; text-align: center; }
-        #debug-log { position: absolute; bottom: 0; width: 100%; height: 60px; background: #111; font-size: 10px; color: #444; overflow-y: scroll; padding: 5px; border-top: 1px solid #222; }
+        #debug { position: absolute; bottom: 0; width: 100%; height: 50px; background: #111; font-size: 10px; color: #444; padding: 5px; }
     </style>
 </head>
 <body>
 
-    <div id="ils-container">
-        <div id="heading-bug">▼</div>
-        
-        <div id="cdi-scale">
-            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-            <div class="dot center"></div>
-            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-            
-            <div id="needle"></div>
+    <div id="status-area">
+        <div id="instruction">WAITING</div>
+        <div id="lightbar">
+            <div class="segment" id="seg-3L">L3</div>
+            <div class="segment" id="seg-2L">L2</div>
+            <div class="segment" id="seg-1L">L1</div>
+            <div class="segment center" id="seg-C">OK</div>
+            <div class="segment" id="seg-1R">R1</div>
+            <div class="segment" id="seg-2R">R2</div>
+            <div class="segment" id="seg-3R">R3</div>
         </div>
-
-        <div id="status-text">OFFLINE</div>
     </div>
 
     <div id="btn-container">
-        <button class="btn" id="mainBtn">Start Sensors</button>
-        <button class="btn" id="nextBtn">Next Row (180° Flip)</button>
+        <button class="btn" id="mainBtn">1. START SENSORS</button>
+        <button class="btn" id="nextBtn">NEXT ROW (FLIP)</button>
     </div>
-    
-    <div id="stats">HEADING: --° | DRIFT: --°</div>
-    <div id="debug-log">System Log: Ready. Ensure phone is flat.</div>
+
+    <div id="debug">System Ready.</div>
 
     <script>
         let appState = "READY"; 
         let initialHeading = null;
         let smoothedHeading = 0;
-        const alpha = 0.15; // Jitter smoothing
+        const alpha = 0.15; 
 
-        const log = (msg) => { document.getElementById('debug-log').innerText += "\n> " + msg; };
-        const needle = document.getElementById('needle');
-        const statusText = document.getElementById('status-text');
+        const segments = {
+            'L3': document.getElementById('seg-3L'), 'L2': document.getElementById('seg-2L'), 'L1': document.getElementById('seg-1L'),
+            'C': document.getElementById('seg-C'),
+            'R1': document.getElementById('seg-1R'), 'R2': document.getElementById('seg-2R'), 'R3': document.getElementById('seg-3R')
+        };
+        const instruction = document.getElementById('instruction');
         const mainBtn = document.getElementById('mainBtn');
         const nextBtn = document.getElementById('nextBtn');
-        const stats = document.getElementById('stats');
+
+        function clearLightbar() {
+            Object.values(segments).forEach(s => s.className = 'segment');
+        }
 
         function handleOrientation(e) {
-            // Android Chrome Compass Handling
-            let heading = e.alpha; 
-            if (e.absolute === false) { /* Optional: Handle non-absolute */ }
-
+            let heading = e.alpha || e.webkitCompassHeading; 
             smoothedHeading = (alpha * heading) + (1.0 - alpha) * smoothedHeading;
 
             if (appState === "LOCKED") {
                 let diff = smoothedHeading - initialHeading;
-                
-                // Compass wrap correction
                 if (diff > 180) diff -= 360;
                 if (diff < -180) diff += 360;
 
-                // ILS Logic: Move needle TOWARD the drift so you "Fly to the Needle"
-                // 50% is center. 4% per degree of drift.
-                let needlePos = 50 + (diff * 4); 
-                needlePos = Math.max(10, Math.min(90, needlePos));
-                needle.style.left = needlePos + "%";
+                clearLightbar();
 
-                if (Math.abs(diff) > 2.0) {
-                    // Correcting directions: If drifting right (positive diff), steer LEFT.
-                    let direction = (diff > 0) ? "LEFT" : "RIGHT";
-                    statusText.innerText = "STEER " + direction;
-                    
-                    if (Math.abs(diff) > 5) {
-                        statusText.style.color = "red";
-                        needle.style.background = "red";
-                        if (navigator.vibrate) navigator.vibrate(100);
-                    } else {
-                        statusText.style.color = "yellow";
-                        needle.style.background = "yellow";
-                    }
-                } else {
-                    statusText.innerText = "ON COURSE";
-                    statusText.style.color = "#39FF14";
-                    needle.style.background = "#39FF14";
-                }
-                stats.innerText = `HEADING: ${Math.round(smoothedHeading)}° | DRIFT: ${diff.toFixed(1)}°`;
+                // LIGHTBAR LOGIC (Fly to the light)
+                // If diff is POSITIVE (drift right), lights fill on the LEFT (to pull you back)
+                if (Math.abs(diff) <= 2) {
+                    segments['C'].classList.add('on-green');
+                    instruction.innerText = "ON COURSE";
+                    instruction.style.color = "#39FF14";
+                } 
+                else if (diff > 2 && diff <= 5) { segments['L1'].classList.add('on-yellow'); instruction.innerText = "STEER LEFT"; instruction.style.color = "#ffcc00"; }
+                else if (diff > 5 && diff <= 10) { segments['L2'].classList.add('on-yellow'); instruction.innerText = "STEER LEFT"; }
+                else if (diff > 10) { segments['L3'].classList.add('on-red'); instruction.innerText = "HARD LEFT"; instruction.style.color = "#ff3333"; }
+                
+                else if (diff < -2 && diff >= -5) { segments['R1'].classList.add('on-yellow'); instruction.innerText = "STEER RIGHT"; instruction.style.color = "#ffcc00"; }
+                else if (diff < -5 && diff >= -10) { segments['R2'].classList.add('on-yellow'); instruction.innerText = "STEER RIGHT"; }
+                else if (diff < -10) { segments['R3'].classList.add('on-red'); instruction.innerText = "HARD RIGHT"; instruction.style.color = "#ff3333"; }
             } else {
-                statusText.innerText = "SENSING: " + Math.round(smoothedHeading) + "°";
+                instruction.innerText = Math.round(smoothedHeading) + "°";
             }
         }
 
-        mainBtn.addEventListener('click', async () => {
-            log("User action: Start sequence...");
-
+        mainBtn.addEventListener('click', () => {
             if (appState === "READY") {
-                // Initial Sensor Wakeup
-                if ('ondeviceorientationabsolute' in window) {
-                    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-                    log("Absolute Sensors Online.");
-                } else {
-                    window.addEventListener('deviceorientation', handleOrientation, true);
-                    log("Standard Sensors Online.");
-                }
-                
+                window.addEventListener('deviceorientationabsolute', handleOrientation, true);
                 appState = "MAPPING";
-                mainBtn.innerText = "Set Start Point";
-                statusText.innerText = "Align Mower & Click";
+                mainBtn.innerText = "2. SET START POINT";
             } 
             else if (appState === "MAPPING") {
-                // Mark the start of the first row
                 appState = "WALKING";
                 initialHeading = smoothedHeading;
-                mainBtn.innerText = "Finish First Line";
+                mainBtn.innerText = "3. FINISH FIRST LINE";
                 mainBtn.style.background = "#ff3333";
-                statusText.innerText = "Walk the Line...";
-                log("Path Start Locked at " + Math.round(initialHeading) + "°");
             }
             else if (appState === "WALKING") {
-                // Calibrate the path and lock the ILS
                 appState = "LOCKED";
                 initialHeading = smoothedHeading; 
-                mainBtn.innerText = "Reset System";
-                mainBtn.style.background = "#444";
+                mainBtn.innerText = "RESET SYSTEM";
+                mainBtn.style.background = "#222";
                 mainBtn.style.color = "#fff";
                 nextBtn.style.display = "block";
-                statusText.innerText = "ILS CAPTURED";
-                log("ILS Calibration Complete.");
-                if (navigator.vibrate) navigator.vibrate([200,
+                instruction.innerText = "PATH LOCKED";
+            }
+            else { location.reload(); }
+        });
+
+        nextBtn.addEventListener('click', () => {
+            initialHeading = (initialHeading + 180) % 360;
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+        });
+    </script>
+</body>
+</html>
